@@ -38,6 +38,7 @@ namespace WebLab2
         static private bool ready = false;
         private static Socket socket;
         public static string token;
+        private static bool finished = false;
 
         static async void ServerListener()
         {
@@ -45,13 +46,16 @@ namespace WebLab2
             serverListener.Start();
             Console.WriteLine($"Server: Listening on {localhost}:{port}");
             ready = true;
+            System.Diagnostics.Process.Start("https://oauth.vk.com/authorize?client_id=7650154&display=page&redirect_uri=http://localhost:80&scope=friends&response_type=code&v=5.126");
             while (true)
             {
             }
         }
 
-        static void RequestName()
+        static bool RequestName()
         {
+            if (token == null)
+                return false;
             WebRequest request = WebRequest.Create("https://api.vk.com/method/users.get?v=5.124&access_token=" + token);
 
             try
@@ -62,15 +66,21 @@ namespace WebLab2
                 string userResponse = streamReader.ReadToEnd();
 
                 UsrResponse usrResponse = JsonConvert.DeserializeObject<UsrResponse>(userResponse);
-                Console.WriteLine("Welcome, " + usrResponse.response[0].first_name + " " +
-                                  usrResponse.response[0].last_name);
+                if (usrResponse.response == null)
+                    return false;
+                if (!finished)
+                {
+                    finished = true;
+                    Console.WriteLine("Welcome, " + usrResponse.response[0].first_name + " " +
+                                      usrResponse.response[0].last_name);
+                }
             }
             catch
             {
-                Console.WriteLine("Something went wrong!");
+                return false;
             }
 
-            Console.ReadKey();
+            return false;
         }
 
         static void Main(string[] args)
@@ -79,29 +89,43 @@ namespace WebLab2
 
             while (token == null)
             {
-                if (!ready)
+                try
                 {
-                    continue;
+
+                    if (!ready)
+                    {
+                        continue;
+                    }
+
+                    socket = serverListener.AcceptSocketAsync().Result;
+                    //Console.WriteLine("Connected: " + socket.LocalEndPoint);
+
+                    Task.Run(() => ReadStream());
                 }
+                catch
+                {
 
-                socket = serverListener.AcceptSocketAsync().Result;
-                //Console.WriteLine("Connected: " + socket.LocalEndPoint);
-
-                Task.Run(() => ReadStream());
+                }
             }
-            RequestName();
+
+            while (!RequestName());
+            Console.ReadKey();
         }
 
         static async void ReadStream()
         {
-            while (socket.Connected)
+            bool alive = true;
+            while (socket == null)
+            {
+
+            }
+            while (socket.Connected && alive)
             {
                 NetworkStream stream = new NetworkStream(socket);
                 StreamReader streamReader = new StreamReader(stream);
-                String data = await streamReader.ReadLineAsync();
-                //Console.WriteLine(data);
                 try
                 {
+                    String data = await streamReader.ReadLineAsync();
                     token = "";
                     if (data != null && data.Contains("code="))
                     {
@@ -114,12 +138,13 @@ namespace WebLab2
                         StreamReader streamReaderToken = new StreamReader(streamToken);
                         string tokenResponse = streamReaderToken.ReadToEnd();
                         token = JsonConvert.DeserializeObject<TokenResponse>(tokenResponse).access_token;
+                        alive = false;
                         socket.Close();
                     }
                 }
                 catch
                 {
-                    Console.WriteLine("Can't parse the token or code");
+                    //Console.WriteLine("Can't parse the token or code");
                 }
             }
         }
